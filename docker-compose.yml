@@ -1,0 +1,8 @@
+services:
+  blackjack-server:
+    build: ./server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./server:/app
+      - /app/node_modules
