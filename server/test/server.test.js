@@ -210,6 +210,111 @@ test('disconnecting marks the seat disconnected, and rejoining with the token re
   }
 });
 
+test('hitting until bust advances the turn', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const guest = await openClient(port);
+    const box = trackState(host, guest);
+
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room' }));
+    const { roomCode } = await created;
+
+    const joined = nextMessage(guest);
+    guest.send(JSON.stringify({ type: 'join_room', roomCode }));
+    await joined;
+
+    await waitUntil(() => box.state && box.state.phase === 'playing');
+
+    const actingSeat = box.state.turn;
+    const actingClient = actingSeat === 'host' ? host : guest;
+
+    let turnAdvanced = false;
+    let previousHandLength = box.state.hands[actingSeat].length;
+
+    for (let i = 0; i < 10 && !turnAdvanced; i++) {
+      actingClient.send(JSON.stringify({ type: 'hit' }));
+      await waitUntil(
+        () =>
+          box.state.hands[actingSeat].length > previousHandLength ||
+          box.state.turn !== actingSeat ||
+          box.state.phase !== 'playing'
+      );
+      if (box.state.turn !== actingSeat || box.state.phase !== 'playing') {
+        turnAdvanced = true;
+        break;
+      }
+      previousHandLength = box.state.hands[actingSeat].length;
+    }
+
+    assert.ok(
+      turnAdvanced,
+      'expected the turn to advance (or the round to move past "playing") after repeated hits'
+    );
+
+    host.close();
+    guest.close();
+  } finally {
+    server.close();
+  }
+});
+
+test('both players readying up deals a fresh round', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const guest = await openClient(port);
+    const box = trackState(host, guest);
+
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room' }));
+    const { roomCode } = await created;
+
+    const joined = nextMessage(guest);
+    guest.send(JSON.stringify({ type: 'join_room', roomCode }));
+    await joined;
+
+    await waitUntil(() => box.state && box.state.phase !== 'waiting');
+
+    async function playToResults() {
+      while (box.state.phase === 'playing') {
+        const actingClient = box.state.turn === 'host' ? host : guest;
+        const turnBeforeAction = box.state.turn;
+        actingClient.send(JSON.stringify({ type: 'stand' }));
+        await waitUntil(() => box.state.turn !== turnBeforeAction || box.state.phase !== 'playing');
+      }
+    }
+
+    await playToResults();
+    assert.equal(box.state.phase, 'results');
+
+    host.send(JSON.stringify({ type: 'ready' }));
+    await waitUntil(() => box.state.readyForNext.host === true);
+
+    guest.send(JSON.stringify({ type: 'ready' }));
+    await waitUntil(
+      () => box.state.readyForNext.host === false && box.state.readyForNext.guest === false
+    );
+
+    assert.ok(['playing', 'results'].includes(box.state.phase));
+    assert.equal(box.state.readyForNext.host, false);
+    assert.equal(box.state.readyForNext.guest, false);
+
+    await playToResults();
+
+    assert.equal(box.state.phase, 'results');
+    const hostTotal =
+      box.state.tally.host.win + box.state.tally.host.lose + box.state.tally.host.push;
+    assert.equal(hostTotal, 2);
+
+    host.close();
+    guest.close();
+  } finally {
+    server.close();
+  }
+});
+
 test('an abandoned room is garbage-collected after the cleanup delay', async () => {
   const { server, port } = await startTestServer();
   try {

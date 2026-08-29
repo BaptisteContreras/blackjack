@@ -30,11 +30,8 @@ function advanceTurn(room) {
 function playDealerAndResolve(room) {
   room.phase = 'dealer';
   room.turn = null;
-  const anyoneStillIn = TURN_ORDER.some((seat) => !isBust(room.hands[seat]));
-  if (anyoneStillIn) {
-    while (dealerShouldHit(room.hands.dealer)) {
-      room.hands.dealer.push(drawCard(room));
-    }
+  while (dealerShouldHit(room.hands.dealer)) {
+    room.hands.dealer.push(drawCard(room));
   }
   for (const seat of TURN_ORDER) {
     const outcome = resolveOutcome(room.hands[seat], room.hands.dealer);
@@ -180,6 +177,9 @@ function onReady(room, seat) {
 }
 
 function handleMessage(ws, msg) {
+  if (!msg || typeof msg !== 'object') {
+    return sendError(ws, 'invalid message');
+  }
   switch (msg.type) {
     case 'create_room':
       return onCreateRoom(ws);
@@ -214,6 +214,7 @@ function handleDisconnect(ws) {
 function createServer(port) {
   const wss = new WebSocketServer({ port });
   wss.on('connection', (ws) => {
+    ws.on('error', () => {});
     ws.on('message', (raw) => {
       let msg;
       try {

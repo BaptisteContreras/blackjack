@@ -33,6 +33,11 @@ let socket = null;
 let currentRoomCode = null;
 let currentPlayerToken = null;
 let pendingIntent = null;
+// True only once the server has confirmed we are actually seated in a room
+// (via 'created'/'joined', or a 'state' broadcast after a successful rejoin).
+// While false, an 'error' means our join/rejoin attempt failed, not that an
+// in-game action was invalid.
+let hasJoinedRoom = false;
 
 function connect() {
   socket = new WebSocket(SERVER_URL);
@@ -59,6 +64,7 @@ function onSocketClose() {
 }
 
 function reconnect() {
+  hasJoinedRoom = false;
   pendingIntent = {
     type: 'rejoin_room',
     roomCode: currentRoomCode,
@@ -72,18 +78,35 @@ function onSocketMessage(event) {
   if (msg.type === 'created') {
     currentRoomCode = msg.roomCode;
     currentPlayerToken = msg.playerToken;
-    saveSession();
+    hasJoinedRoom = true;
     showTableScreen();
     roomCodeDisplay.textContent = `Room code: ${currentRoomCode}`;
     lobbyStatus.textContent = '';
+    saveSession();
   } else if (msg.type === 'joined') {
     currentPlayerToken = msg.playerToken;
-    saveSession();
+    hasJoinedRoom = true;
     showTableScreen();
     roomCodeDisplay.textContent = `Room code: ${currentRoomCode}`;
     lobbyStatus.textContent = '';
+    saveSession();
   } else if (msg.type === 'error') {
-    if (tableScreen.hidden) {
+    if (!hasJoinedRoom) {
+      // We were attempting to create/join/rejoin a room and it failed (room
+      // not found, invalid token, server restarted, etc.) - the stored
+      // session is no longer valid, so drop it and send the user back to a
+      // working lobby instead of leaving them stuck on a blank table.
+      try {
+        localStorage.removeItem('blackjackSession');
+      } catch {
+        // ignore storage errors
+      }
+      currentRoomCode = null;
+      currentPlayerToken = null;
+      tableScreen.hidden = true;
+      lobbyScreen.hidden = false;
+      lobbyStatus.textContent = msg.message;
+    } else if (tableScreen.hidden) {
       lobbyStatus.textContent = msg.message;
     } else {
       connectionStatus.textContent = msg.message;
@@ -92,20 +115,30 @@ function onSocketMessage(event) {
       }, 2000);
     }
   } else if (msg.type === 'state') {
+    hasJoinedRoom = true;
     renderState(msg);
   }
 }
 
 function saveSession() {
-  localStorage.setItem(
-    'blackjackSession',
-    JSON.stringify({ roomCode: currentRoomCode, playerToken: currentPlayerToken })
-  );
+  try {
+    localStorage.setItem(
+      'blackjackSession',
+      JSON.stringify({ roomCode: currentRoomCode, playerToken: currentPlayerToken })
+    );
+  } catch {
+    // localStorage unavailable (private browsing, file://, etc.) - degrade
+    // gracefully by simply not persisting the session for auto-rejoin.
+  }
 }
 
 function loadSession() {
-  const raw = localStorage.getItem('blackjackSession');
-  return raw ? JSON.parse(raw) : null;
+  try {
+    const raw = localStorage.getItem('blackjackSession');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
 }
 
 function showTableScreen() {
@@ -116,6 +149,7 @@ function showTableScreen() {
 createRoomButton.addEventListener('click', async () => {
   currentRoomCode = null;
   currentPlayerToken = null;
+  hasJoinedRoom = false;
   pendingIntent = { type: 'create_room' };
   await connect();
 });
@@ -128,6 +162,7 @@ joinRoomButton.addEventListener('click', async () => {
   }
   currentRoomCode = roomCode;
   currentPlayerToken = null;
+  hasJoinedRoom = false;
   pendingIntent = { type: 'join_room', roomCode };
   await connect();
 });
@@ -168,18 +203,23 @@ function renderHand(container, cards) {
   }
 }
 
+function valueTextFor(cards, phase) {
+  if (phase === 'waiting' && cards.length === 0) return '';
+  return `Value: ${computeDisplayValue(cards)}`;
+}
+
 function renderState(state) {
   const opponentSeat = state.you === 'host' ? 'guest' : 'host';
 
   renderHand(yourCardsEl, state.hands[state.you]);
-  yourValueEl.textContent = `Value: ${computeDisplayValue(state.hands[state.you])}`;
+  yourValueEl.textContent = valueTextFor(state.hands[state.you], state.phase);
 
   renderHand(opponentCardsEl, state.hands[opponentSeat]);
-  opponentValueEl.textContent = `Value: ${computeDisplayValue(state.hands[opponentSeat])}`;
+  opponentValueEl.textContent = valueTextFor(state.hands[opponentSeat], state.phase);
 
   renderHand(dealerCardsEl, state.hands.dealer);
   dealerValueEl.textContent =
-    state.phase === 'playing' ? '' : `Value: ${computeDisplayValue(state.hands.dealer)}`;
+    state.phase === 'playing' ? '' : valueTextFor(state.hands.dealer, state.phase);
 
   const yourTurn = state.phase === 'playing' && state.turn === state.you;
   hitButton.disabled = !yourTurn;
@@ -201,10 +241,12 @@ function renderState(state) {
     readyButton.hidden = true;
   }
 
-  if (!state.bothConnected) {
-    connectionStatus.textContent = 'Waiting for opponent to reconnect...';
-  } else if (connectionStatus.textContent === 'Waiting for opponent to reconnect...') {
+  if (state.bothConnected) {
     connectionStatus.textContent = '';
+  } else if (state.phase === 'waiting') {
+    connectionStatus.textContent = 'Waiting for your friend to join...';
+  } else {
+    connectionStatus.textContent = 'Waiting for opponent to reconnect...';
   }
 }
 
@@ -225,6 +267,7 @@ readyButton.addEventListener('click', () => {
   if (session) {
     currentRoomCode = session.roomCode;
     currentPlayerToken = session.playerToken;
+    hasJoinedRoom = false;
     pendingIntent = {
       type: 'rejoin_room',
       roomCode: session.roomCode,
