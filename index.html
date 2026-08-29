@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Blackjack with a Friend</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main id="lobby-screen">
+    <h1>Blackjack</h1>
+    <section>
+      <button id="create-room-button">Create Room</button>
+    </section>
+    <section>
+      <input id="room-code-input" placeholder="Room code" maxlength="4" />
+      <button id="join-room-button">Join Room</button>
+    </section>
+    <p id="lobby-status"></p>
+  </main>
+
+  <main id="table-screen" hidden>
+    <p id="room-code-display"></p>
+    <p id="connection-status"></p>
+
+    <section class="hand" id="dealer-hand">
+      <h2>Dealer</h2>
+      <div class="cards" id="dealer-cards"></div>
+      <p id="dealer-value"></p>
+    </section>
+
+    <section class="hand" id="opponent-hand">
+      <h2>Opponent</h2>
+      <div class="cards" id="opponent-cards"></div>
+      <p id="opponent-value"></p>
+    </section>
+
+    <section class="hand" id="your-hand">
+      <h2>You</h2>
+      <div class="cards" id="your-cards"></div>
+      <p id="your-value"></p>
+    </section>
+
+    <section id="controls">
+      <button id="hit-button">Hit</button>
+      <button id="stand-button">Stand</button>
+      <button id="ready-button" hidden>Play Again</button>
+    </section>
+
+    <p id="round-result"></p>
+    <p id="tally-display"></p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
