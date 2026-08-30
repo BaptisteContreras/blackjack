@@ -19,8 +19,10 @@ const connectionStatus = document.getElementById('connection-status');
 
 const dealerCardsEl = document.getElementById('dealer-cards');
 const dealerValueEl = document.getElementById('dealer-value');
+const opponentHandSection = document.getElementById('opponent-hand');
 const opponentCardsEl = document.getElementById('opponent-cards');
 const opponentValueEl = document.getElementById('opponent-value');
+const yourHandSection = document.getElementById('your-hand');
 const yourCardsEl = document.getElementById('your-cards');
 const yourValueEl = document.getElementById('your-value');
 const hitButton = document.getElementById('hit-button');
@@ -184,23 +186,40 @@ function computeDisplayValue(cards) {
   return total;
 }
 
+const CARD_SUIT_LETTERS = { '♥': 'H', '♦': 'D', '♣': 'C', '♠': 'S' };
+const CARD_SUIT_NAMES = { '♥': 'Hearts', '♦': 'Diamonds', '♣': 'Clubs', '♠': 'Spades' };
+
 function renderCard(card) {
-  const div = document.createElement('div');
+  const img = document.createElement('img');
+  img.className = 'card';
   if (card.hidden) {
-    div.className = 'card hidden';
-    return div;
+    img.src = 'cards/back.png';
+    img.alt = 'Face-down card';
+    return img;
   }
-  const isRed = card.suit === '♥' || card.suit === '♦';
-  div.className = `card ${isRed ? 'red' : 'black'}`;
-  div.textContent = `${card.rank}${card.suit}`;
-  return div;
+  img.src = `cards/${card.rank}${CARD_SUIT_LETTERS[card.suit]}.png`;
+  img.alt = `${card.rank} of ${CARD_SUIT_NAMES[card.suit]}`;
+  return img;
 }
 
 function renderHand(container, cards) {
+  // Only the cards added since the last render should play the "dealt in"
+  // animation - otherwise every hit/stand broadcast would re-animate the
+  // whole hand. A shorter hand than last time means a new round started,
+  // so its initial cards count as freshly dealt too.
+  const previousCount = Number(container.dataset.prevCount || 0);
+  const isFreshHand = cards.length < previousCount;
+  const animateFromIndex = isFreshHand ? 0 : previousCount;
+
   container.innerHTML = '';
-  for (const card of cards) {
-    container.appendChild(renderCard(card));
-  }
+  cards.forEach((card, index) => {
+    const cardEl = renderCard(card);
+    if (index >= animateFromIndex) {
+      cardEl.classList.add('card-deal');
+    }
+    container.appendChild(cardEl);
+  });
+  container.dataset.prevCount = String(cards.length);
 }
 
 function valueTextFor(cards, phase) {
@@ -222,13 +241,22 @@ function renderState(state) {
     state.phase === 'playing' ? '' : valueTextFor(state.hands.dealer, state.phase);
 
   const yourTurn = state.phase === 'playing' && state.turn === state.you;
+  const opponentTurn = state.phase === 'playing' && state.turn === opponentSeat;
   hitButton.disabled = !yourTurn;
   standButton.disabled = !yourTurn;
+  yourHandSection.classList.toggle('active-turn', yourTurn);
+  opponentHandSection.classList.toggle('active-turn', opponentTurn);
 
   if (state.phase === 'results') {
     const result = state.results[state.you];
     roundResultEl.textContent =
       result === 'win' ? 'You win!' : result === 'lose' ? 'You lose.' : 'Push.';
+    // Force a reflow so the pop animation replays even if this same result
+    // (and therefore the same class list) was already set by a previous
+    // broadcast (e.g. the opponent clicking "Play Again" first).
+    roundResultEl.className = '';
+    void roundResultEl.offsetWidth;
+    roundResultEl.className = `${result} pop`;
     const tally = state.tally[state.you];
     tallyDisplayEl.textContent = `Session: ${tally.win}W - ${tally.lose}L - ${tally.push}P`;
     readyButton.hidden = false;
@@ -238,6 +266,7 @@ function renderState(state) {
       : 'Play Again';
   } else {
     roundResultEl.textContent = '';
+    roundResultEl.className = '';
     readyButton.hidden = true;
   }
 
