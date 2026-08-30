@@ -6,7 +6,7 @@ const isLocalDev =
   location.hostname === '127.0.0.1';
 const SERVER_URL = isLocalDev
   ? 'ws://localhost:8080'
-  : 'wss://REPLACE_WITH_YOUR_SERVER_URL.onrender.com';
+  : 'wss://blackjack-eta-peach.vercel.app';
 
 const lobbyScreen = document.getElementById('lobby-screen');
 const tableScreen = document.getElementById('table-screen');
