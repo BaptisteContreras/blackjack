@@ -29,7 +29,10 @@ const hitButton = document.getElementById('hit-button');
 const standButton = document.getElementById('stand-button');
 const readyButton = document.getElementById('ready-button');
 const roundResultEl = document.getElementById('round-result');
-const tallyDisplayEl = document.getElementById('tally-display');
+const leaderboardYouRow = document.getElementById('leaderboard-you');
+const leaderboardYouScoreEl = document.getElementById('leaderboard-you-score');
+const leaderboardOpponentRow = document.getElementById('leaderboard-opponent');
+const leaderboardOpponentScoreEl = document.getElementById('leaderboard-opponent-score');
 
 let socket = null;
 let currentRoomCode = null;
@@ -227,6 +230,13 @@ function valueTextFor(cards, phase) {
   return `Value: ${computeDisplayValue(cards)}`;
 }
 
+function updateLeaderboard(yourTally, opponentTally) {
+  leaderboardYouScoreEl.textContent = `${yourTally.win}W - ${yourTally.lose}L - ${yourTally.push}P`;
+  leaderboardOpponentScoreEl.textContent = `${opponentTally.win}W - ${opponentTally.lose}L - ${opponentTally.push}P`;
+  leaderboardYouRow.classList.toggle('leader', yourTally.win > opponentTally.win);
+  leaderboardOpponentRow.classList.toggle('leader', opponentTally.win > yourTally.win);
+}
+
 function renderState(state) {
   const opponentSeat = state.you === 'host' ? 'guest' : 'host';
 
@@ -247,6 +257,8 @@ function renderState(state) {
   yourHandSection.classList.toggle('active-turn', yourTurn);
   opponentHandSection.classList.toggle('active-turn', opponentTurn);
 
+  updateLeaderboard(state.tally[state.you], state.tally[opponentSeat]);
+
   if (state.phase === 'results') {
     const result = state.results[state.you];
     roundResultEl.textContent =
@@ -257,8 +269,6 @@ function renderState(state) {
     roundResultEl.className = '';
     void roundResultEl.offsetWidth;
     roundResultEl.className = `${result} pop`;
-    const tally = state.tally[state.you];
-    tallyDisplayEl.textContent = `Session: ${tally.win}W - ${tally.lose}L - ${tally.push}P`;
     readyButton.hidden = false;
     readyButton.disabled = state.readyForNext[state.you];
     readyButton.textContent = state.readyForNext[state.you]

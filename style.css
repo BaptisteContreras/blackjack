@@ -315,8 +315,56 @@ button:disabled {
   animation: resultPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-#tally-display {
-  color: rgba(245, 239, 224, 0.8);
-  font-size: 0.9rem;
+#leaderboard {
+  margin-top: 1.25rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.22);
+  border: 2px solid rgba(212, 175, 55, 0.5);
+  border-radius: 14px;
+}
+
+#leaderboard h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold-light);
+  margin: 0 0 0.5rem;
+}
+
+.leaderboard-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  transition: background-color 0.3s ease;
+}
+
+.leaderboard-row + .leaderboard-row {
   margin-top: 0.25rem;
+}
+
+.leaderboard-name {
+  font-weight: 600;
+  color: var(--cream);
+}
+
+.leaderboard-score {
+  color: rgba(245, 239, 224, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+.leaderboard-row.leader {
+  background: rgba(212, 175, 55, 0.18);
+}
+
+.leaderboard-row.leader .leaderboard-name {
+  color: var(--gold-light);
+}
+
+.leaderboard-row.leader .leaderboard-name::before {
+  content: '\1F451';
+  margin-right: 0.4em;
 }
