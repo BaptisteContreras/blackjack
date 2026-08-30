@@ -6,7 +6,7 @@ const isLocalDev =
   location.hostname === '127.0.0.1';
 const SERVER_URL = isLocalDev
   ? 'ws://localhost:8080'
-  : 'wss://blackjack-kzzc.vercel.app';
+  : 'wss://blackjack-v2v3.onrender.com';
 
 const lobbyScreen = document.getElementById('lobby-screen');
 const tableScreen = document.getElementById('table-screen');
