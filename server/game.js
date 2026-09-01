@@ -62,6 +62,13 @@ function resolveOutcome(playerCards, dealerCards) {
   return 'push';
 }
 
+function computePayout(result, isPlayerBlackjack, bet) {
+  if (result === 'push') return bet;
+  if (result === 'lose') return 0;
+  if (isPlayerBlackjack) return bet + Math.floor(bet * 1.5);
+  return bet * 2;
+}
+
 module.exports = {
   createShuffledDeck,
   handValue,
@@ -69,4 +76,5 @@ module.exports = {
   isBlackjack,
   dealerShouldHit,
   resolveOutcome,
+  computePayout,
 };

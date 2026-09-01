@@ -9,6 +9,7 @@ const {
   isBlackjack,
   dealerShouldHit,
   resolveOutcome,
+  computePayout,
 } = require('../game');
 
 test('createShuffledDeck returns 52 unique cards', () => {
@@ -104,4 +105,25 @@ test('resolveOutcome: equal values push', () => {
   const hand = [{ rank: '9', suit: '♠' }, { rank: '9', suit: '♥' }];
   const dealerHand = [{ rank: 'K', suit: '♣' }, { rank: '8', suit: '♦' }];
   assert.equal(resolveOutcome(hand, dealerHand), 'push');
+});
+
+test('computePayout: push returns the full stake and nothing more', () => {
+  assert.equal(computePayout('push', false, 50), 50);
+  assert.equal(computePayout('push', true, 50), 50);
+});
+
+test('computePayout: lose returns nothing (the stake was already deducted)', () => {
+  assert.equal(computePayout('lose', false, 50), 0);
+  assert.equal(computePayout('lose', true, 50), 0);
+});
+
+test('computePayout: normal win pays 1:1 (stake back plus an equal amount)', () => {
+  assert.equal(computePayout('win', false, 50), 100);
+  assert.equal(computePayout('win', false, 1), 2);
+});
+
+test('computePayout: blackjack win pays 3:2, rounded down for odd bets', () => {
+  assert.equal(computePayout('win', true, 50), 125);
+  assert.equal(computePayout('win', true, 5), 12);
+  assert.equal(computePayout('win', true, 1), 2);
 });
