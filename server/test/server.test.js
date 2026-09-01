@@ -46,6 +46,12 @@ function trackState(...sockets) {
   return box;
 }
 
+async function placeBetsAndWaitForPlaying(host, guest, box, amount = 50) {
+  host.send(JSON.stringify({ type: 'place_bet', amount }));
+  guest.send(JSON.stringify({ type: 'place_bet', amount }));
+  await waitUntil(() => box.state.phase === 'playing');
+}
+
 async function startTestServer() {
   const port = 9000 + Math.floor(Math.random() * 10000);
   const server = createServer(port);
@@ -69,7 +75,9 @@ test('create_room then join_room deals a round to both players', async () => {
     guest.send(JSON.stringify({ type: 'join_room', roomCode: createdMsg.roomCode }));
     await joined;
 
-    await waitUntil(() => box.state && box.state.phase !== 'waiting');
+    await waitUntil(() => box.state && box.state.phase === 'betting');
+    await placeBetsAndWaitForPlaying(host, guest, box);
+
     assert.equal(box.state.phase, 'playing');
     assert.equal(box.state.hands.host.length, 2);
     assert.equal(box.state.hands.guest.length, 2);
@@ -125,7 +133,8 @@ test('acting out of turn is rejected with an error', async () => {
     guest.send(JSON.stringify({ type: 'join_room', roomCode }));
     await joined;
 
-    await waitUntil(() => box.state && box.state.phase === 'playing');
+    await waitUntil(() => box.state && box.state.phase === 'betting');
+    await placeBetsAndWaitForPlaying(host, guest, box);
     const outOfTurnClient = box.state.turn === 'host' ? guest : host;
 
     const errorMsg = nextMessage(outOfTurnClient);
@@ -156,7 +165,8 @@ test('a full round of standing resolves to results with a tally', async () => {
     guest.send(JSON.stringify({ type: 'join_room', roomCode }));
     await joined;
 
-    await waitUntil(() => box.state && box.state.phase !== 'waiting');
+    await waitUntil(() => box.state && box.state.phase === 'betting');
+    await placeBetsAndWaitForPlaying(host, guest, box);
 
     while (box.state.phase === 'playing') {
       const actingClient = box.state.turn === 'host' ? host : guest;
@@ -225,7 +235,8 @@ test('hitting until bust advances the turn', async () => {
     guest.send(JSON.stringify({ type: 'join_room', roomCode }));
     await joined;
 
-    await waitUntil(() => box.state && box.state.phase === 'playing');
+    await waitUntil(() => box.state && box.state.phase === 'betting');
+    await placeBetsAndWaitForPlaying(host, guest, box);
 
     const actingSeat = box.state.turn;
     const actingClient = actingSeat === 'host' ? host : guest;
@@ -260,7 +271,7 @@ test('hitting until bust advances the turn', async () => {
   }
 });
 
-test('both players readying up deals a fresh round', async () => {
+test('both players readying up returns to betting, and new bets deal a fresh round', async () => {
   const { server, port } = await startTestServer();
   try {
     const host = await openClient(port);
@@ -275,9 +286,10 @@ test('both players readying up deals a fresh round', async () => {
     guest.send(JSON.stringify({ type: 'join_room', roomCode }));
     await joined;
 
-    await waitUntil(() => box.state && box.state.phase !== 'waiting');
+    await waitUntil(() => box.state && box.state.phase === 'betting');
 
-    async function playToResults() {
+    async function placeBetsAndPlayToResults() {
+      await placeBetsAndWaitForPlaying(host, guest, box);
       while (box.state.phase === 'playing') {
         const actingClient = box.state.turn === 'host' ? host : guest;
         const turnBeforeAction = box.state.turn;
@@ -286,27 +298,124 @@ test('both players readying up deals a fresh round', async () => {
       }
     }
 
-    await playToResults();
+    await placeBetsAndPlayToResults();
     assert.equal(box.state.phase, 'results');
 
     host.send(JSON.stringify({ type: 'ready' }));
     await waitUntil(() => box.state.readyForNext.host === true);
 
     guest.send(JSON.stringify({ type: 'ready' }));
-    await waitUntil(
-      () => box.state.readyForNext.host === false && box.state.readyForNext.guest === false
-    );
+    await waitUntil(() => box.state.phase === 'betting');
 
-    assert.ok(['playing', 'results'].includes(box.state.phase));
     assert.equal(box.state.readyForNext.host, false);
     assert.equal(box.state.readyForNext.guest, false);
+    assert.deepEqual(box.state.bets, { host: null, guest: null });
 
-    await playToResults();
+    await placeBetsAndPlayToResults();
 
     assert.equal(box.state.phase, 'results');
     const hostTotal =
       box.state.tally.host.win + box.state.tally.host.lose + box.state.tally.host.push;
     assert.equal(hostTotal, 2);
+
+    host.close();
+    guest.close();
+  } finally {
+    server.close();
+  }
+});
+
+test('create_room honors a custom startingBankroll, exposed once the room fills', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room', startingBankroll: 500 }));
+    const { roomCode } = await created;
+
+    const guest = await openClient(port);
+    const box = trackState(host, guest);
+    const joined = nextMessage(guest);
+    guest.send(JSON.stringify({ type: 'join_room', roomCode }));
+    await joined;
+
+    await waitUntil(() => box.state && box.state.phase === 'betting');
+    assert.equal(box.state.startingBankroll, 500);
+    assert.deepEqual(box.state.bankroll, { host: 500, guest: 500 });
+
+    host.close();
+    guest.close();
+  } finally {
+    server.close();
+  }
+});
+
+test('placing a bet deducts it from bankroll immediately (escrow)', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const guest = await openClient(port);
+    const box = trackState(host, guest);
+
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room' }));
+    const { roomCode } = await created;
+
+    const joined = nextMessage(guest);
+    guest.send(JSON.stringify({ type: 'join_room', roomCode }));
+    await joined;
+    await waitUntil(() => box.state && box.state.phase === 'betting');
+
+    host.send(JSON.stringify({ type: 'place_bet', amount: 100 }));
+    await waitUntil(() => box.state.bets.host === 100);
+    assert.equal(box.state.bankroll.host, 900);
+    assert.equal(box.state.phase, 'betting');
+
+    host.close();
+    guest.close();
+  } finally {
+    server.close();
+  }
+});
+
+test('place_bet is rejected outside betting phase, when already placed, or with an invalid amount', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const guest = await openClient(port);
+    const box = trackState(host);
+
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room' }));
+    const { roomCode } = await created;
+
+    const tooEarly = nextMessage(host);
+    host.send(JSON.stringify({ type: 'place_bet', amount: 10 }));
+    const tooEarlyErr = await tooEarly;
+    assert.equal(tooEarlyErr.message, 'not in betting phase');
+
+    const joined = nextMessage(guest);
+    guest.send(JSON.stringify({ type: 'join_room', roomCode }));
+    await joined;
+    await waitUntil(() => box.state && box.state.phase === 'betting');
+
+    const invalidAmount = nextMessage(host);
+    host.send(JSON.stringify({ type: 'place_bet', amount: 0 }));
+    const invalidErr = await invalidAmount;
+    assert.equal(invalidErr.message, 'invalid bet amount');
+
+    const tooMuch = nextMessage(host);
+    host.send(JSON.stringify({ type: 'place_bet', amount: box.state.bankroll.host + 1 }));
+    const tooMuchErr = await tooMuch;
+    assert.equal(tooMuchErr.message, 'invalid bet amount');
+
+    host.send(JSON.stringify({ type: 'place_bet', amount: 50 }));
+    await waitUntil(() => box.state.bets.host === 50);
+
+    const alreadyPlaced = nextMessage(host);
+    host.send(JSON.stringify({ type: 'place_bet', amount: 50 }));
+    const alreadyErr = await alreadyPlaced;
+    assert.equal(alreadyErr.message, 'bet already placed');
 
     host.close();
     guest.close();

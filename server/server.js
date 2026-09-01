@@ -2,7 +2,7 @@
 
 const { WebSocketServer } = require('ws');
 const rooms = require('./rooms');
-const { createShuffledDeck, isBust, isBlackjack, dealerShouldHit, resolveOutcome } = require('./game');
+const { createShuffledDeck, isBust, isBlackjack, dealerShouldHit, resolveOutcome, computePayout } = require('./game');
 
 const TURN_ORDER = ['host', 'guest'];
 const ROOM_GC_DELAY_MS = Number(process.env.ROOM_GC_DELAY_MS) || rooms.ROOM_GC_DELAY_MS;
@@ -41,6 +41,14 @@ function playDealerAndResolve(room) {
   room.phase = 'results';
 }
 
+function enterBetting(room) {
+  room.phase = 'betting';
+  room.bets = { host: null, guest: null };
+  room.hands = { host: [], guest: [], dealer: [] };
+  room.turn = null;
+  room.readyForNext = { host: false, guest: false };
+}
+
 function startRound(room) {
   room.deck = createShuffledDeck();
   room.hands = {
@@ -76,6 +84,9 @@ function buildStateView(room, viewerSeat) {
     results: room.results,
     tally: room.tally,
     readyForNext: room.readyForNext,
+    startingBankroll: room.startingBankroll,
+    bankroll: room.bankroll,
+    bets: room.bets,
     bothConnected: Boolean(
       room.seats.host && room.seats.host.connected && room.seats.guest && room.seats.guest.connected
     ),
@@ -101,8 +112,8 @@ function broadcastState(room) {
   }
 }
 
-function onCreateRoom(ws) {
-  const room = rooms.createRoom();
+function onCreateRoom(ws, startingBankroll) {
+  const room = rooms.createRoom(startingBankroll);
   const token = rooms.addSeat(room, 'host', ws);
   ws.roomCode = room.code;
   ws.seat = 'host';
@@ -122,6 +133,21 @@ function onJoinRoom(ws, roomCode) {
   send(ws, { type: 'joined', playerToken: token });
 
   if (rooms.isRoomFull(room)) {
+    enterBetting(room);
+  }
+  broadcastState(room);
+}
+
+function onPlaceBet(room, seat, amount) {
+  const ws = room.seats[seat].ws;
+  if (room.phase !== 'betting') return sendError(ws, 'not in betting phase');
+  if (room.bets[seat] !== null) return sendError(ws, 'bet already placed');
+  if (!Number.isInteger(amount) || amount < 1 || amount > room.bankroll[seat]) {
+    return sendError(ws, 'invalid bet amount');
+  }
+  room.bets[seat] = amount;
+  room.bankroll[seat] -= amount;
+  if (room.bets.host !== null && room.bets.guest !== null) {
     startRound(room);
   }
   broadcastState(room);
@@ -171,7 +197,7 @@ function onReady(room, seat) {
   if (room.phase !== 'results') return;
   room.readyForNext[seat] = true;
   if (room.readyForNext.host && room.readyForNext.guest) {
-    startRound(room);
+    enterBetting(room);
   }
   broadcastState(room);
 }
@@ -182,11 +208,13 @@ function handleMessage(ws, msg) {
   }
   switch (msg.type) {
     case 'create_room':
-      return onCreateRoom(ws);
+      return onCreateRoom(ws, msg.startingBankroll);
     case 'join_room':
       return onJoinRoom(ws, msg.roomCode);
     case 'rejoin_room':
       return onRejoinRoom(ws, msg.roomCode, msg.playerToken);
+    case 'place_bet':
+      return withRoomAndSeat(ws, (room, seat) => onPlaceBet(room, seat, msg.amount));
     case 'hit':
       return withRoomAndSeat(ws, onHit);
     case 'stand':
