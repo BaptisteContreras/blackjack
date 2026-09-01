@@ -17,6 +17,22 @@ const roomCodeInput = document.getElementById('room-code-input');
 const roomCodeDisplay = document.getElementById('room-code-display');
 const connectionStatus = document.getElementById('connection-status');
 
+const startingBankrollInput = document.getElementById('starting-bankroll-input');
+const resetGameButton = document.getElementById('reset-game-button');
+const dealerHandSection = document.getElementById('dealer-hand');
+const controlsSection = document.getElementById('controls');
+const yourBankrollEl = document.getElementById('your-bankroll');
+const opponentBankrollEl = document.getElementById('opponent-bankroll');
+const bettingPhaseSection = document.getElementById('betting-phase');
+const bettingBankrollDisplay = document.getElementById('betting-bankroll-display');
+const betAmountInput = document.getElementById('bet-amount-input');
+const placeBetButton = document.getElementById('place-bet-button');
+const bettingStatus = document.getElementById('betting-status');
+const gameOverScreen = document.getElementById('game-over-screen');
+const gameOverTitle = document.getElementById('game-over-title');
+const gameOverBankrolls = document.getElementById('game-over-bankrolls');
+const newGameButton = document.getElementById('new-game-button');
+
 const dealerCardsEl = document.getElementById('dealer-cards');
 const dealerValueEl = document.getElementById('dealer-value');
 const opponentHandSection = document.getElementById('opponent-hand');
@@ -155,7 +171,9 @@ createRoomButton.addEventListener('click', async () => {
   currentRoomCode = null;
   currentPlayerToken = null;
   hasJoinedRoom = false;
-  pendingIntent = { type: 'create_room' };
+  const raw = startingBankrollInput.value.trim();
+  const startingBankroll = raw === '' ? undefined : parseInt(raw, 10);
+  pendingIntent = { type: 'create_room', startingBankroll };
   await connect();
 });
 
@@ -237,6 +255,47 @@ function updateLeaderboard(yourTally, opponentTally) {
   leaderboardOpponentRow.classList.toggle('leader', opponentTally.win > yourTally.win);
 }
 
+function updateBankrollBadges(state) {
+  const opponentSeat = state.you === 'host' ? 'guest' : 'host';
+  if (state.phase === 'waiting') {
+    yourBankrollEl.textContent = '';
+    opponentBankrollEl.textContent = '';
+    return;
+  }
+  yourBankrollEl.textContent = `🪙 ${state.bankroll[state.you]}`;
+  opponentBankrollEl.textContent = `🪙 ${state.bankroll[opponentSeat]}`;
+}
+
+function renderBettingPhase(state) {
+  const opponentSeat = state.you === 'host' ? 'guest' : 'host';
+  const yourBet = state.bets[state.you];
+  const opponentBet = state.bets[opponentSeat];
+  bettingBankrollDisplay.textContent = `Your chips: ${state.bankroll[state.you]}`;
+  if (yourBet === null) {
+    betAmountInput.disabled = false;
+    betAmountInput.max = String(state.bankroll[state.you]);
+    placeBetButton.disabled = false;
+    bettingStatus.textContent = '';
+  } else {
+    betAmountInput.disabled = true;
+    placeBetButton.disabled = true;
+    bettingStatus.textContent = opponentBet === null ? "Waiting for opponent's bet..." : '';
+  }
+}
+
+function renderGameOver(state) {
+  const opponentSeat = state.you === 'host' ? 'guest' : 'host';
+  const youZero = state.bankroll[state.you] === 0;
+  const oppZero = state.bankroll[opponentSeat] === 0;
+  gameOverTitle.textContent = youZero && oppZero
+    ? 'You both ran out of chips!'
+    : youZero
+    ? "Game Over — you're out of chips."
+    : 'You win the game!';
+  gameOverBankrolls.textContent =
+    `Final chips — You: ${state.bankroll[state.you]}, Opponent: ${state.bankroll[opponentSeat]}`;
+}
+
 function renderState(state) {
   const opponentSeat = state.you === 'host' ? 'guest' : 'host';
 
@@ -259,25 +318,40 @@ function renderState(state) {
 
   updateLeaderboard(state.tally[state.you], state.tally[opponentSeat]);
 
-  if (state.phase === 'results') {
+  updateBankrollBadges(state);
+
+  resetGameButton.hidden = state.phase === 'waiting';
+
+  const isBettingPhase = state.phase === 'betting';
+  bettingPhaseSection.hidden = !isBettingPhase;
+  dealerHandSection.hidden = isBettingPhase;
+  opponentHandSection.hidden = isBettingPhase;
+  yourHandSection.hidden = isBettingPhase;
+  controlsSection.hidden = isBettingPhase;
+  if (isBettingPhase) renderBettingPhase(state);
+
+  const isGameOver = state.phase === 'game_over';
+  gameOverScreen.hidden = !isGameOver;
+  if (isGameOver) renderGameOver(state);
+
+  if (state.phase === 'results' || state.phase === 'game_over') {
     const result = state.results[state.you];
     roundResultEl.textContent =
       result === 'win' ? 'You win!' : result === 'lose' ? 'You lose.' : 'Push.';
-    // Force a reflow so the pop animation replays even if this same result
-    // (and therefore the same class list) was already set by a previous
-    // broadcast (e.g. the opponent clicking "Play Again" first).
     roundResultEl.className = '';
     void roundResultEl.offsetWidth;
     roundResultEl.className = `${result} pop`;
-    readyButton.hidden = false;
+  } else {
+    roundResultEl.textContent = '';
+    roundResultEl.className = '';
+  }
+
+  readyButton.hidden = state.phase !== 'results';
+  if (state.phase === 'results') {
     readyButton.disabled = state.readyForNext[state.you];
     readyButton.textContent = state.readyForNext[state.you]
       ? 'Waiting for opponent...'
       : 'Play Again';
-  } else {
-    roundResultEl.textContent = '';
-    roundResultEl.className = '';
-    readyButton.hidden = true;
   }
 
   if (state.bothConnected) {
@@ -299,6 +373,24 @@ standButton.addEventListener('click', () => {
 
 readyButton.addEventListener('click', () => {
   socket.send(JSON.stringify({ type: 'ready' }));
+});
+
+placeBetButton.addEventListener('click', () => {
+  const amount = parseInt(betAmountInput.value, 10);
+  socket.send(JSON.stringify({ type: 'place_bet', amount }));
+});
+
+newGameButton.addEventListener('click', () => {
+  socket.send(JSON.stringify({ type: 'reset_game' }));
+});
+
+resetGameButton.addEventListener('click', () => {
+  const confirmed = window.confirm(
+    "Reset the game? This restores both players' chip counts and cannot be undone."
+  );
+  if (confirmed) {
+    socket.send(JSON.stringify({ type: 'reset_game' }));
+  }
 });
 
 (function autoRejoin() {

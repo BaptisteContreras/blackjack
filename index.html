@@ -12,6 +12,15 @@
   <main id="lobby-screen">
     <h1>Blackjack</h1>
     <section>
+      <label for="starting-bankroll-input">Starting chips</label>
+      <input
+        id="starting-bankroll-input"
+        type="number"
+        min="10"
+        max="1000000"
+        step="1"
+        placeholder="1000"
+      />
       <button id="create-room-button">Create Room</button>
     </section>
     <section>
@@ -23,7 +32,22 @@
 
   <main id="table-screen" hidden>
     <p id="room-code-display"></p>
+    <button id="reset-game-button" hidden>Reset Game</button>
     <p id="connection-status"></p>
+
+    <section id="game-over-screen" hidden>
+      <h2 id="game-over-title"></h2>
+      <p id="game-over-bankrolls"></p>
+      <button id="new-game-button">New Game</button>
+    </section>
+
+    <section id="betting-phase" hidden>
+      <h2>Place your bet</h2>
+      <p id="betting-bankroll-display"></p>
+      <input id="bet-amount-input" type="number" min="1" step="1" />
+      <button id="place-bet-button">Place Bet</button>
+      <p id="betting-status"></p>
+    </section>
 
     <section class="hand" id="dealer-hand">
       <h2>Dealer</h2>
@@ -32,13 +56,13 @@
     </section>
 
     <section class="hand" id="opponent-hand">
-      <h2>Opponent</h2>
+      <h2>Opponent <span class="bankroll-badge" id="opponent-bankroll"></span></h2>
       <div class="cards" id="opponent-cards"></div>
       <p id="opponent-value"></p>
     </section>
 
     <section class="hand" id="your-hand">
-      <h2>You</h2>
+      <h2>You <span class="bankroll-badge" id="your-bankroll"></span></h2>
       <div class="cards" id="your-cards"></div>
       <p id="your-value"></p>
     </section>
