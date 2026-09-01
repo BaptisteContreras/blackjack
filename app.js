@@ -270,10 +270,22 @@ function renderBettingPhase(state) {
   const opponentSeat = state.you === 'host' ? 'guest' : 'host';
   const yourBet = state.bets[state.you];
   const opponentBet = state.bets[opponentSeat];
-  bettingBankrollDisplay.textContent = `Your chips: ${state.bankroll[state.you]}`;
+  const bankroll = state.bankroll[state.you];
+  bettingBankrollDisplay.textContent = `Your chips: ${bankroll}`;
   if (yourBet === null) {
     betAmountInput.disabled = false;
-    betAmountInput.max = String(state.bankroll[state.you]);
+    betAmountInput.max = String(bankroll);
+    // Keep whatever the player already typed if it's still a valid bet for
+    // their current bankroll; otherwise fall back to a small clamped default.
+    // Without this, a fresh session starts with an empty input (parseInt ->
+    // NaN -> "amount": null sent to the server) and a shrunken bankroll after
+    // a loss can leave a stale, now-too-large amount sitting in the field.
+    const typedValue = parseInt(betAmountInput.value, 10);
+    const typedValueStillValid =
+      Number.isInteger(typedValue) && typedValue > 0 && typedValue <= bankroll;
+    if (!typedValueStillValid) {
+      betAmountInput.value = String(Math.min(10, bankroll));
+    }
     placeBetButton.disabled = false;
     bettingStatus.textContent = '';
   } else {
@@ -377,6 +389,13 @@ readyButton.addEventListener('click', () => {
 
 placeBetButton.addEventListener('click', () => {
   const amount = parseInt(betAmountInput.value, 10);
+  // betAmountInput.max is kept in sync with the current bankroll by
+  // renderBettingPhase, so it's a reliable ceiling here even though the
+  // browser doesn't enforce the max attribute outside form validation.
+  const maxBet = parseInt(betAmountInput.max, 10);
+  const isValidAmount =
+    Number.isInteger(amount) && amount > 0 && (!Number.isInteger(maxBet) || amount <= maxBet);
+  if (!isValidAmount) return;
   socket.send(JSON.stringify({ type: 'place_bet', amount }));
 });
 

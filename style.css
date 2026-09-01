@@ -401,6 +401,10 @@ button:disabled {
   vertical-align: middle;
 }
 
+.bankroll-badge:empty {
+  display: none;
+}
+
 #reset-game-button {
   font-size: 0.8rem;
   padding: 0.4rem 1rem;
