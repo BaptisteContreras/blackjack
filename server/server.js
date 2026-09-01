@@ -33,12 +33,16 @@ function playDealerAndResolve(room) {
   while (dealerShouldHit(room.hands.dealer)) {
     room.hands.dealer.push(drawCard(room));
   }
+  let someoneHitZero = false;
   for (const seat of TURN_ORDER) {
     const outcome = resolveOutcome(room.hands[seat], room.hands.dealer);
     room.results[seat] = outcome;
     room.tally[seat][outcome] += 1;
+    const payout = computePayout(outcome, isBlackjack(room.hands[seat]), room.bets[seat]);
+    room.bankroll[seat] += payout;
+    if (room.bankroll[seat] === 0) someoneHitZero = true;
   }
-  room.phase = 'results';
+  room.phase = someoneHitZero ? 'game_over' : 'results';
 }
 
 function enterBetting(room) {
@@ -202,6 +206,19 @@ function onReady(room, seat) {
   broadcastState(room);
 }
 
+function onResetGame(room) {
+  room.bankroll = { host: room.startingBankroll, guest: room.startingBankroll };
+  room.bets = { host: null, guest: null };
+  room.hands = { host: [], guest: [], dealer: [] };
+  room.deck = [];
+  room.stood = { host: false, guest: false };
+  room.results = { host: null, guest: null };
+  room.readyForNext = { host: false, guest: false };
+  room.turn = null;
+  room.phase = rooms.isRoomFull(room) ? 'betting' : 'waiting';
+  broadcastState(room);
+}
+
 function handleMessage(ws, msg) {
   if (!msg || typeof msg !== 'object') {
     return sendError(ws, 'invalid message');
@@ -221,6 +238,8 @@ function handleMessage(ws, msg) {
       return withRoomAndSeat(ws, onStand);
     case 'ready':
       return withRoomAndSeat(ws, onReady);
+    case 'reset_game':
+      return withRoomAndSeat(ws, (room) => onResetGame(room));
     default:
       return sendError(ws, 'unknown message type');
   }

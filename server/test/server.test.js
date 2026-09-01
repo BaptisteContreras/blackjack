@@ -440,6 +440,100 @@ test('place_bet is rejected outside betting phase, when already placed, or with 
   }
 });
 
+test('a bankroll hitting exactly 0 ends the game with phase game_over', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const guest = await openClient(port);
+    const box = trackState(host, guest);
+
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room', startingBankroll: 1 }));
+    const { roomCode } = await created;
+
+    const joined = nextMessage(guest);
+    guest.send(JSON.stringify({ type: 'join_room', roomCode }));
+    await joined;
+    await waitUntil(() => box.state && box.state.phase === 'betting');
+    // rooms.js clamps startingBankroll up to MIN_STARTING_BANKROLL (10), so the
+    // requested value of 1 above is not what actually lands in room state;
+    // read back the room's real starting bankroll instead of assuming it's 1.
+    const actualStartingBankroll = box.state.startingBankroll;
+
+    async function playOneRoundAllIn() {
+      host.send(JSON.stringify({ type: 'place_bet', amount: box.state.bankroll.host }));
+      guest.send(JSON.stringify({ type: 'place_bet', amount: box.state.bankroll.guest }));
+      await waitUntil(() => box.state.phase !== 'betting');
+      while (box.state.phase === 'playing') {
+        const actingClient = box.state.turn === 'host' ? host : guest;
+        const turnBeforeAction = box.state.turn;
+        actingClient.send(JSON.stringify({ type: 'stand' }));
+        await waitUntil(() => box.state.turn !== turnBeforeAction || box.state.phase !== 'playing');
+      }
+    }
+
+    for (let round = 0; round < 100 && box.state.phase !== 'game_over'; round++) {
+      await playOneRoundAllIn();
+      if (box.state.phase === 'results') {
+        host.send(JSON.stringify({ type: 'ready' }));
+        guest.send(JSON.stringify({ type: 'ready' }));
+        await waitUntil(() => box.state.phase === 'betting' || box.state.phase === 'game_over');
+      }
+    }
+
+    assert.equal(box.state.phase, 'game_over');
+    assert.ok(box.state.bankroll.host === 0 || box.state.bankroll.guest === 0);
+
+    host.send(JSON.stringify({ type: 'reset_game' }));
+    await waitUntil(() => box.state.phase === 'betting');
+    assert.deepEqual(box.state.bankroll, {
+      host: actualStartingBankroll,
+      guest: actualStartingBankroll,
+    });
+
+    host.close();
+    guest.close();
+  } finally {
+    server.close();
+  }
+});
+
+test('reset_game restores bankrolls and phase from mid-round without touching the tally', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const guest = await openClient(port);
+    const box = trackState(host, guest);
+
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room', startingBankroll: 300 }));
+    const { roomCode } = await created;
+
+    const joined = nextMessage(guest);
+    guest.send(JSON.stringify({ type: 'join_room', roomCode }));
+    await joined;
+    await waitUntil(() => box.state && box.state.phase === 'betting');
+
+    await placeBetsAndWaitForPlaying(host, guest, box, 100);
+    assert.equal(box.state.bankroll.host, 200);
+
+    host.send(JSON.stringify({ type: 'reset_game' }));
+    await waitUntil(() => box.state.phase === 'betting');
+
+    assert.deepEqual(box.state.bankroll, { host: 300, guest: 300 });
+    assert.deepEqual(box.state.bets, { host: null, guest: null });
+    assert.equal(
+      box.state.tally.host.win + box.state.tally.host.lose + box.state.tally.host.push,
+      0
+    );
+
+    host.close();
+    guest.close();
+  } finally {
+    server.close();
+  }
+});
+
 test('an abandoned room is garbage-collected after the cleanup delay', async () => {
   const { server, port } = await startTestServer();
   try {
