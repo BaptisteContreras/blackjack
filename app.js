@@ -320,7 +320,7 @@ function renderState(state) {
 
   updateBankrollBadges(state);
 
-  resetGameButton.hidden = state.phase === 'waiting';
+  resetGameButton.hidden = false;
 
   const isBettingPhase = state.phase === 'betting';
   bettingPhaseSection.hidden = !isBettingPhase;
