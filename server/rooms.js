@@ -4,6 +4,18 @@ const rooms = new Map();
 const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const ROOM_CODE_LENGTH = 4;
 const ROOM_GC_DELAY_MS = 10 * 60 * 1000;
+const DEFAULT_STARTING_BANKROLL = 1000;
+const MIN_STARTING_BANKROLL = 10;
+const MAX_STARTING_BANKROLL = 1000000;
+
+function clampStartingBankroll(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) {
+    return DEFAULT_STARTING_BANKROLL;
+  }
+  const rounded = Math.floor(num);
+  return Math.min(MAX_STARTING_BANKROLL, Math.max(MIN_STARTING_BANKROLL, rounded));
+}
 
 function generateRoomCode() {
   let code = '';
@@ -17,12 +29,13 @@ function generatePlayerToken() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function createRoom() {
+function createRoom(startingBankroll) {
   let code;
   do {
     code = generateRoomCode();
   } while (rooms.has(code));
 
+  const bankroll = clampStartingBankroll(startingBankroll);
   const room = {
     code,
     seats: { host: null, guest: null },
@@ -37,6 +50,9 @@ function createRoom() {
       host: { win: 0, lose: 0, push: 0 },
       guest: { win: 0, lose: 0, push: 0 },
     },
+    startingBankroll: bankroll,
+    bankroll: { host: bankroll, guest: bankroll },
+    bets: { host: null, guest: null },
     gcTimer: null,
   };
   rooms.set(code, room);

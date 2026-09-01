@@ -13,6 +13,46 @@ test('createRoom generates a 4-character code with empty seats', () => {
   rooms.removeRoom(room.code);
 });
 
+test('createRoom defaults startingBankroll to 1000 when omitted', () => {
+  const room = rooms.createRoom();
+  assert.equal(room.startingBankroll, 1000);
+  assert.deepEqual(room.bankroll, { host: 1000, guest: 1000 });
+  assert.deepEqual(room.bets, { host: null, guest: null });
+  rooms.removeRoom(room.code);
+});
+
+test('createRoom clamps a non-positive or non-numeric startingBankroll to the default', () => {
+  const roomA = rooms.createRoom(-50);
+  assert.equal(roomA.startingBankroll, 1000);
+  rooms.removeRoom(roomA.code);
+
+  const roomB = rooms.createRoom('not a number');
+  assert.equal(roomB.startingBankroll, 1000);
+  rooms.removeRoom(roomB.code);
+
+  const roomC = rooms.createRoom(0);
+  assert.equal(roomC.startingBankroll, 1000);
+  rooms.removeRoom(roomC.code);
+});
+
+test('createRoom clamps an absurdly large startingBankroll down to 1,000,000', () => {
+  const room = rooms.createRoom(50000000);
+  assert.equal(room.startingBankroll, 1000000);
+  rooms.removeRoom(room.code);
+});
+
+test('createRoom clamps a too-small positive startingBankroll up to 10', () => {
+  const room = rooms.createRoom(3);
+  assert.equal(room.startingBankroll, 10);
+  rooms.removeRoom(room.code);
+});
+
+test('createRoom floors a non-integer startingBankroll before clamping', () => {
+  const room = rooms.createRoom(500.7);
+  assert.equal(room.startingBankroll, 500);
+  rooms.removeRoom(room.code);
+});
+
 test('addSeat assigns a token and marks the seat connected', () => {
   const room = rooms.createRoom();
   const token = rooms.addSeat(room, 'host', { fake: 'ws' });
