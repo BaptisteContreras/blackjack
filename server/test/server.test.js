@@ -47,9 +47,25 @@ function trackState(...sockets) {
 }
 
 async function placeBetsAndWaitForPlaying(host, guest, box, amount = 50) {
+  // Track host's and guest's own copies of the broadcast in addition to the
+  // caller's shared box. box.state can flip to 'playing' off whichever
+  // socket's copy of the broadcast arrives first; a caller that immediately
+  // does nextMessage(host) or nextMessage(guest) right after this resolves
+  // would otherwise race that socket's own still-in-flight copy of the same
+  // 'playing' broadcast. Waiting for all three confirms both sockets have
+  // already fully processed their own copy before we return.
+  const hostBox = trackState(host);
+  const guestBox = trackState(guest);
   host.send(JSON.stringify({ type: 'place_bet', amount }));
   guest.send(JSON.stringify({ type: 'place_bet', amount }));
-  await waitUntil(() => box.state.phase === 'playing');
+  await waitUntil(
+    () =>
+      box.state.phase === 'playing' &&
+      hostBox.state &&
+      hostBox.state.phase === 'playing' &&
+      guestBox.state &&
+      guestBox.state.phase === 'playing'
+  );
 }
 
 async function startTestServer() {
