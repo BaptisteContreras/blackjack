@@ -219,6 +219,16 @@ function onResetGame(room) {
   broadcastState(room);
 }
 
+function onLeaveRoom(room, seat) {
+  const opponentSeat = TURN_ORDER.find((s) => s !== seat);
+  const opponentInfo = room.seats[opponentSeat];
+  if (opponentInfo && opponentInfo.connected) {
+    send(opponentInfo.ws, { type: 'opponent_left' });
+  }
+  rooms.cancelRoomCleanup(room);
+  rooms.removeRoom(room.code);
+}
+
 function handleMessage(ws, msg) {
   if (!msg || typeof msg !== 'object') {
     return sendError(ws, 'invalid message');
@@ -240,6 +250,8 @@ function handleMessage(ws, msg) {
       return withRoomAndSeat(ws, onReady);
     case 'reset_game':
       return withRoomAndSeat(ws, (room) => onResetGame(room));
+    case 'leave_room':
+      return withRoomAndSeat(ws, onLeaveRoom);
     default:
       return sendError(ws, 'unknown message type');
   }

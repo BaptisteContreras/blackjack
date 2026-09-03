@@ -19,13 +19,19 @@ const connectionStatus = document.getElementById('connection-status');
 
 const startingBankrollInput = document.getElementById('starting-bankroll-input');
 const resetGameButton = document.getElementById('reset-game-button');
+const leaveRoomButton = document.getElementById('leave-room-button');
 const dealerHandSection = document.getElementById('dealer-hand');
 const controlsSection = document.getElementById('controls');
 const yourBankrollEl = document.getElementById('your-bankroll');
 const opponentBankrollEl = document.getElementById('opponent-bankroll');
 const bettingPhaseSection = document.getElementById('betting-phase');
 const bettingBankrollDisplay = document.getElementById('betting-bankroll-display');
-const betAmountInput = document.getElementById('bet-amount-input');
+const chipRowEl = document.getElementById('chip-row');
+const betStackEl = document.getElementById('bet-stack');
+const betTotalAmountEl = document.getElementById('bet-total-amount');
+const bettingActionsEl = document.getElementById('betting-actions');
+const clearBetButton = document.getElementById('clear-bet-button');
+const allInButton = document.getElementById('all-in-button');
 const placeBetButton = document.getElementById('place-bet-button');
 const bettingStatus = document.getElementById('betting-status');
 const gameOverScreen = document.getElementById('game-over-screen');
@@ -59,6 +65,14 @@ let pendingIntent = null;
 // While false, an 'error' means our join/rejoin attempt failed, not that an
 // in-game action was invalid.
 let hasJoinedRoom = false;
+
+// Chip-based betting state, entirely client-local until "Place Bet" is
+// clicked - the server only ever sees the final summed amount.
+let stackedChips = []; // chip values staged for this bet, in click order
+let betIsAllIn = false;
+let bettingRoundBankroll = 0; // bankroll snapshot the current chip row/stack was built for
+let bettingDenominations = []; // chip values available this betting round
+let wasInBettingPhase = false; // true only while yourBet is null during 'betting'
 
 function connect() {
   socket = new WebSocket(SERVER_URL);
@@ -94,6 +108,19 @@ function reconnect() {
   connect();
 }
 
+function returnToLobby(message) {
+  try {
+    localStorage.removeItem('blackjackSession');
+  } catch {
+    // ignore storage errors
+  }
+  currentRoomCode = null;
+  currentPlayerToken = null;
+  tableScreen.hidden = true;
+  lobbyScreen.hidden = false;
+  lobbyStatus.textContent = message;
+}
+
 function onSocketMessage(event) {
   const msg = JSON.parse(event.data);
   if (msg.type === 'created') {
@@ -117,16 +144,7 @@ function onSocketMessage(event) {
       // not found, invalid token, server restarted, etc.) - the stored
       // session is no longer valid, so drop it and send the user back to a
       // working lobby instead of leaving them stuck on a blank table.
-      try {
-        localStorage.removeItem('blackjackSession');
-      } catch {
-        // ignore storage errors
-      }
-      currentRoomCode = null;
-      currentPlayerToken = null;
-      tableScreen.hidden = true;
-      lobbyScreen.hidden = false;
-      lobbyStatus.textContent = msg.message;
+      returnToLobby(msg.message);
     } else if (tableScreen.hidden) {
       lobbyStatus.textContent = msg.message;
     } else {
@@ -135,6 +153,8 @@ function onSocketMessage(event) {
         connectionStatus.textContent = '';
       }, 2000);
     }
+  } else if (msg.type === 'opponent_left') {
+    returnToLobby('Your opponent left the game.');
   } else if (msg.type === 'state') {
     hasJoinedRoom = true;
     renderState(msg);
@@ -266,32 +286,150 @@ function updateBankrollBadges(state) {
   opponentBankrollEl.textContent = `🪙 ${state.bankroll[opponentSeat]}`;
 }
 
+const CHIP_FRACTIONS = [0.01, 0.05, 0.1, 0.25, 0.5];
+const CHIP_TIER_COUNT = 5;
+
+// Rounds to a "nice" number (1/2/5/10/20/50/100/...) so chip denominations
+// never land on an ugly value like 137, regardless of bankroll size.
+function niceChipRound(x) {
+  if (x <= 1) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(x));
+  const normalized = x / magnitude;
+  let nice;
+  if (normalized < 1.5) nice = 1;
+  else if (normalized < 3.5) nice = 2;
+  else if (normalized < 7.5) nice = 5;
+  else nice = 10;
+  return Math.round(nice * magnitude);
+}
+
+// Denominations scale to the player's current bankroll (roughly 1/5/10/25/50%,
+// each rounded to a nice number) so betting takes a reasonable number of
+// clicks whether the bankroll is 10 chips or 1,000,000.
+function computeChipDenominations(bankroll) {
+  const values = [];
+  for (const fraction of CHIP_FRACTIONS) {
+    const rounded = Math.min(bankroll, niceChipRound(bankroll * fraction));
+    if (rounded >= 1 && !values.includes(rounded)) {
+      values.push(rounded);
+    }
+  }
+  if (values.length === 0) {
+    values.push(Math.min(1, bankroll));
+  }
+  return values;
+}
+
+function formatChipValue(value) {
+  if (value >= 1000) {
+    const thousands = value / 1000;
+    return `${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}K`;
+  }
+  return String(value);
+}
+
+function buildChipVisual(tagName, label, tierIndex) {
+  const chip = document.createElement(tagName);
+  chip.className = `chip chip-tier-${tierIndex}`;
+  const valueEl = document.createElement('span');
+  valueEl.className = 'chip-value';
+  valueEl.textContent = label;
+  chip.appendChild(valueEl);
+  return chip;
+}
+
+function stagedBetTotal() {
+  return stackedChips.reduce((sum, value) => sum + value, 0);
+}
+
+function renderChipRow() {
+  chipRowEl.innerHTML = '';
+  const remaining = bettingRoundBankroll - stagedBetTotal();
+  bettingDenominations.forEach((value, index) => {
+    const chip = buildChipVisual('button', formatChipValue(value), index % CHIP_TIER_COUNT);
+    chip.type = 'button';
+    chip.disabled = value > remaining;
+    chip.setAttribute('aria-label', `Add a ${value}-chip to your bet`);
+    chip.addEventListener('click', () => {
+      stackedChips.push(value);
+      betIsAllIn = false;
+      refreshBettingUI();
+    });
+    chipRowEl.appendChild(chip);
+  });
+}
+
+function renderBetStack() {
+  if (betIsAllIn) {
+    betStackEl.innerHTML = '';
+    const chip = buildChipVisual('div', 'ALL IN', CHIP_TIER_COUNT);
+    chip.classList.add('chip-allin', 'chip-toss');
+    betStackEl.appendChild(chip);
+    betStackEl.dataset.prevCount = '1';
+    return;
+  }
+  // Only newly-added chips play the toss-in animation, same idea as
+  // renderHand's "only animate the cards dealt since last render".
+  const previousCount = Number(betStackEl.dataset.prevCount || 0);
+  const isFreshStack = stackedChips.length < previousCount;
+  const animateFromIndex = isFreshStack ? 0 : previousCount;
+
+  betStackEl.innerHTML = '';
+  stackedChips.forEach((value, index) => {
+    const chip = buildChipVisual('div', formatChipValue(value), index % CHIP_TIER_COUNT);
+    chip.classList.add('chip-in-stack');
+    if (index >= animateFromIndex) chip.classList.add('chip-toss');
+    betStackEl.appendChild(chip);
+  });
+  betStackEl.dataset.prevCount = String(stackedChips.length);
+}
+
+function updateBettingControls() {
+  const total = stagedBetTotal();
+  betTotalAmountEl.textContent = String(total);
+  placeBetButton.disabled = total <= 0 || total > bettingRoundBankroll;
+  clearBetButton.disabled = total <= 0;
+}
+
+function refreshBettingUI() {
+  renderChipRow();
+  renderBetStack();
+  updateBettingControls();
+}
+
 function renderBettingPhase(state) {
   const opponentSeat = state.you === 'host' ? 'guest' : 'host';
   const yourBet = state.bets[state.you];
   const opponentBet = state.bets[opponentSeat];
   const bankroll = state.bankroll[state.you];
   bettingBankrollDisplay.textContent = `Your chips: ${bankroll}`;
+
   if (yourBet === null) {
-    betAmountInput.disabled = false;
-    betAmountInput.max = String(bankroll);
-    // Keep whatever the player already typed if it's still a valid bet for
-    // their current bankroll; otherwise fall back to a small clamped default.
-    // Without this, a fresh session starts with an empty input (parseInt ->
-    // NaN -> "amount": null sent to the server) and a shrunken bankroll after
-    // a loss can leave a stale, now-too-large amount sitting in the field.
-    const typedValue = parseInt(betAmountInput.value, 10);
-    const typedValueStillValid =
-      Number.isInteger(typedValue) && typedValue > 0 && typedValue <= bankroll;
-    if (!typedValueStillValid) {
-      betAmountInput.value = String(Math.min(10, bankroll));
+    // Recompute denominations and clear the stack only on a genuinely fresh
+    // betting round - not on every broadcast while still deciding (e.g. the
+    // opponent placing their bet re-broadcasts state to us too).
+    if (!wasInBettingPhase || bankroll !== bettingRoundBankroll) {
+      bettingRoundBankroll = bankroll;
+      bettingDenominations = computeChipDenominations(bankroll);
+      stackedChips = [];
+      betIsAllIn = false;
+      betStackEl.dataset.prevCount = '0';
     }
-    placeBetButton.disabled = false;
+    wasInBettingPhase = true;
+    chipRowEl.hidden = false;
+    betStackEl.hidden = false;
+    bettingActionsEl.hidden = false;
+    refreshBettingUI();
     bettingStatus.textContent = '';
   } else {
-    betAmountInput.disabled = true;
-    placeBetButton.disabled = true;
-    bettingStatus.textContent = opponentBet === null ? "Waiting for opponent's bet..." : '';
+    wasInBettingPhase = false;
+    chipRowEl.hidden = true;
+    betStackEl.hidden = true;
+    bettingActionsEl.hidden = true;
+    bettingStatus.textContent =
+      opponentBet === null
+        ? `You bet ${yourBet}. Waiting for opponent's bet...`
+        : `You bet ${yourBet}.`;
   }
 }
 
@@ -333,8 +471,12 @@ function renderState(state) {
   updateBankrollBadges(state);
 
   resetGameButton.hidden = false;
+  leaveRoomButton.hidden = false;
 
   const isBettingPhase = state.phase === 'betting';
+  if (!isBettingPhase) {
+    wasInBettingPhase = false;
+  }
   bettingPhaseSection.hidden = !isBettingPhase;
   dealerHandSection.hidden = isBettingPhase;
   opponentHandSection.hidden = isBettingPhase;
@@ -387,20 +529,39 @@ readyButton.addEventListener('click', () => {
   socket.send(JSON.stringify({ type: 'ready' }));
 });
 
+clearBetButton.addEventListener('click', () => {
+  stackedChips = [];
+  betIsAllIn = false;
+  betStackEl.dataset.prevCount = '0';
+  refreshBettingUI();
+});
+
+allInButton.addEventListener('click', () => {
+  if (bettingRoundBankroll <= 0) return;
+  stackedChips = [bettingRoundBankroll];
+  betIsAllIn = true;
+  refreshBettingUI();
+});
+
 placeBetButton.addEventListener('click', () => {
-  const amount = parseInt(betAmountInput.value, 10);
-  // betAmountInput.max is kept in sync with the current bankroll by
-  // renderBettingPhase, so it's a reliable ceiling here even though the
-  // browser doesn't enforce the max attribute outside form validation.
-  const maxBet = parseInt(betAmountInput.max, 10);
-  const isValidAmount =
-    Number.isInteger(amount) && amount > 0 && (!Number.isInteger(maxBet) || amount <= maxBet);
-  if (!isValidAmount) return;
+  const amount = stagedBetTotal();
+  // bettingRoundBankroll is kept in sync with the current bankroll by
+  // renderBettingPhase, so it's a reliable ceiling here.
+  if (amount <= 0 || amount > bettingRoundBankroll) return;
   socket.send(JSON.stringify({ type: 'place_bet', amount }));
 });
 
 newGameButton.addEventListener('click', () => {
   socket.send(JSON.stringify({ type: 'reset_game' }));
+});
+
+leaveRoomButton.addEventListener('click', () => {
+  const confirmed = window.confirm('Leave this room? This ends the game for both players.');
+  if (!confirmed) return;
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'leave_room' }));
+  }
+  returnToLobby('');
 });
 
 resetGameButton.addEventListener('click', () => {

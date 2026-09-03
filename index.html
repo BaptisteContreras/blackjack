@@ -33,6 +33,7 @@
   <main id="table-screen" hidden>
     <p id="room-code-display"></p>
     <button id="reset-game-button" hidden>Reset Game</button>
+    <button id="leave-room-button" hidden>Leave Room</button>
     <p id="connection-status"></p>
 
     <section id="game-over-screen" hidden>
@@ -44,8 +45,14 @@
     <section id="betting-phase" hidden>
       <h2>Place your bet</h2>
       <p id="betting-bankroll-display"></p>
-      <input id="bet-amount-input" type="number" min="1" step="1" />
-      <button id="place-bet-button">Place Bet</button>
+      <div class="chip-stack" id="bet-stack"></div>
+      <p id="bet-total-display">Bet: <span id="bet-total-amount">0</span></p>
+      <div class="chip-row" id="chip-row"></div>
+      <div id="betting-actions">
+        <button id="clear-bet-button" type="button">Clear</button>
+        <button id="all-in-button" type="button">All In</button>
+        <button id="place-bet-button" type="button" disabled>Place Bet</button>
+      </div>
       <p id="betting-status"></p>
     </section>
 

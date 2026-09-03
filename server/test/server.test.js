@@ -534,6 +534,77 @@ test('reset_game restores bankrolls and phase from mid-round without touching th
   }
 });
 
+test('leave_room notifies the opponent and removes the room', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const guest = await openClient(port);
+
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room' }));
+    const { roomCode } = await created;
+
+    const joined = nextMessage(guest);
+    guest.send(JSON.stringify({ type: 'join_room', roomCode }));
+    await joined;
+
+    const opponentLeft = nextMessage(guest);
+    host.send(JSON.stringify({ type: 'leave_room' }));
+    const opponentLeftMsg = await opponentLeft;
+    assert.equal(opponentLeftMsg.type, 'opponent_left');
+
+    await waitUntil(() => rooms.getRoom(roomCode) === undefined);
+
+    host.close();
+    guest.close();
+  } finally {
+    server.close();
+  }
+});
+
+test('leave_room while alone in the room just removes it, with no opponent to notify', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room' }));
+    const { roomCode } = await created;
+
+    assert.ok(rooms.getRoom(roomCode));
+    host.send(JSON.stringify({ type: 'leave_room' }));
+    await waitUntil(() => rooms.getRoom(roomCode) === undefined);
+
+    host.close();
+  } finally {
+    server.close();
+  }
+});
+
+test('leaving a room and rejoining with the old token afterward fails with room not found', async () => {
+  const { server, port } = await startTestServer();
+  try {
+    const host = await openClient(port);
+    const created = nextMessage(host);
+    host.send(JSON.stringify({ type: 'create_room' }));
+    const { roomCode, playerToken } = await created;
+
+    host.send(JSON.stringify({ type: 'leave_room' }));
+    await waitUntil(() => rooms.getRoom(roomCode) === undefined);
+
+    const rejoined = await openClient(port);
+    const errorMsg = nextMessage(rejoined);
+    rejoined.send(JSON.stringify({ type: 'rejoin_room', roomCode, playerToken }));
+    const err = await errorMsg;
+    assert.equal(err.type, 'error');
+    assert.equal(err.message, 'room not found');
+
+    host.close();
+    rejoined.close();
+  } finally {
+    server.close();
+  }
+});
+
 test('an abandoned room is garbage-collected after the cleanup delay', async () => {
   const { server, port } = await startTestServer();
   try {
